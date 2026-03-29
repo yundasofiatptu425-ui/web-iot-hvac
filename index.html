@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard HVAC Monitoring</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; }
+        h1 { text-align: center; color: #333; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        
+        /* Panel Kontrol & Realtime */
+        .top-panel { display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
+        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); flex: 1; min-width: 250px;}
+        .card h2 { margin-top: 0; font-size: 1.2rem; color: #555; }
+        .value { font-size: 2rem; font-weight: bold; color: #007bff; }
+        
+        /* Kontrol Start/Stop */
+        .control-group { margin-top: 15px; }
+        input[type="number"] { padding: 8px; width: 80px; border-radius: 5px; border: 1px solid #ccc; }
+        button { padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; color: white; }
+        .btn-start { background-color: #28a745; }
+        .btn-stop { background-color: #dc3545; }
+        .btn-update { background-color: #17a2b8; }
+
+        /* Grafik */
+        .chart-container { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); margin-bottom: 20px; height: 300px; }
+        .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; }
+
+        /* Tabel */
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: white; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        th, td { padding: 12px; text-align: center; border-bottom: 1px solid #ddd; }
+        th { background-color: #007bff; color: white; }
+        
+        .led-indicator { display: inline-block; width: 20px; height: 20px; border-radius: 50%; }
+        .merah { background-color: red; }
+        .hijau { background-color: #28a745; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Dashboard HVAC Monitoring (ESP32)</h1>
+
+    <div class="top-panel">
+        <div class="card">
+            <h2>Data Saat Ini (Realtime)</h2>
+            <p>Suhu DHT22: <span class="value" id="rt-suhu-dht">0</span> °C</p>
+            <p>Kelembapan: <span class="value" id="rt-hum">0</span> %</p>
+            <p>Suhu LM35: <span class="value" id="rt-suhu-lm">0</span> °C</p>
+            <p>Status LED: <span id="rt-led" class="led-indicator"></span> <span id="rt-led-text">Menunggu...</span></p>
+        </div>
+
+        <div class="card">
+            <h2>Kontrol Panel ESP32</h2>
+            <div class="control-group">
+                <p>Status Logging: <strong id="status-logging">Menunggu...</strong></p>
+                <button class="btn-start" onclick="setLogging(true)">START LOGGING</button>
+                <button class="btn-stop" onclick="setLogging(false)">STOP LOGGING</button>
+            </div>
+            <div class="control-group">
+                <label>Interval Data (Detik): </label>
+                <input type="number" id="interval-input" min="1" value="5">
+                <button class="btn-update" onclick="setInterval()">Update Interval</button>
+            </div>
+        </div>
+    </div>
+
+    <h2>Grafik Riwayat Sensor</h2>
+    <div class="charts-grid">
+        <div class="chart-container"><canvas id="chartSuhuDHT"></canvas></div>
+        <div class="chart-container"><canvas id="chartHum"></canvas></div>
+        <div class="chart-container"><canvas id="chartSuhuLM"></canvas></div>
+    </div>
+
+    <h2>Tabel Riwayat Data Terbaru</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Waktu (Lokal)</th>
+                <th>Suhu DHT22 (°C)</th>
+                <th>Kelembapan (%)</th>
+                <th>Suhu LM35 (°C)</th>
+                <th>Warna LED</th>
+            </tr>
+        </thead>
+        <tbody id="table-body">
+            </tbody>
+    </table>
+</div>
+
+<script>
+    // 1. MASUKKAN KONFIGURASI FIREBASE KAMU DI SINI
+    const firebaseConfig = {
+        apiKey: "AIzaSyA650d6Wo_1-Z0uqAQ59OLeMPBY3YPilFk",
+        authDomain: "monitoring-ry.firebaseapp.com",
+        databaseURL: "https://monitoring-ry-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId: "monitoring-ry",
+        storageBucket: "monitoring-ry.firebasestorage.app",
+        messagingSenderId: "419902638815",
+        appId: "1:419902638815:web:4e4192d90e5bc5821b376a"
+    };
+
+    // Inisialisasi Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // 2. SETUP GRAFIK (Chart.js)
+    const maxDataPoints = 20; // Batasi titik di grafik agar tidak lemot
+    
+    function createChart(ctxId, label, color) {
+        return new Chart(document.getElementById(ctxId), {
+            type: 'line',
+            data: { labels: [], datasets: [{ label: label, data: [], borderColor: color, tension: 0.3, fill: false }] },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+    }
+
+    const chartDHT = createChart('chartSuhuDHT', 'Suhu DHT22 (°C)', '#ff6384');
+    const chartHum = createChart('chartHum', 'Kelembapan (%)', '#36a2eb');
+    const chartLM = createChart('chartSuhuLM', 'Suhu LM35 (°C)', '#ff9f40');
+
+    function updateChart(chart, label, data) {
+        chart.data.labels.push(label);
+        chart.data.datasets[0].data.push(data);
+        if (chart.data.labels.length > maxDataPoints) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+        }
+        chart.update();
+    }
+
+    // 3. MENGAMBIL DATA REALTIME (Untuk Kartu di Atas)
+    db.ref('realtime_data').on('value', (snapshot) => {
+        const data = snapshot.val();
+        if(data) {
+            document.getElementById('rt-suhu-dht').innerText = data.suhu_dht.toFixed(1);
+            document.getElementById('rt-hum').innerText = data.kelembapan.toFixed(1);
+            document.getElementById('rt-suhu-lm').innerText = data.suhu_lm.toFixed(1);
+            
+            const ledInd = document.getElementById('rt-led');
+            document.getElementById('rt-led-text').innerText = data.warna_led;
+            ledInd.className = 'led-indicator ' + (data.warna_led === 'MERAH' ? 'merah' : 'hijau');
+        }
+    });
+
+    // 4. MENGAMBIL DATA RIWAYAT (Untuk Grafik & Tabel)
+    // Ambil 20 data terakhir agar web tidak hang memuat data sebulan
+    db.ref('riwayat_data').limitToLast(maxDataPoints).on('child_added', (snapshot) => {
+        const data = snapshot.val();
+        const timeNow = new Date().toLocaleTimeString('id-ID'); // Waktu lokal komputer
+        
+        // Update Grafik
+        updateChart(chartDHT, timeNow, data.suhu_dht);
+        updateChart(chartHum, timeNow, data.kelembapan);
+        updateChart(chartLM, timeNow, data.suhu_lm);
+
+        // Update Tabel (Masukkan di baris paling atas)
+        const tbody = document.getElementById('table-body');
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${timeNow}</td>
+            <td>${data.suhu_dht.toFixed(1)}</td>
+            <td>${data.kelembapan.toFixed(1)}</td>
+            <td>${data.suhu_lm.toFixed(1)}</td>
+            <td style="color:${data.warna_led === 'MERAH' ? 'red' : 'green'}; font-weight:bold;">${data.warna_led}</td>
+        `;
+        tbody.insertBefore(row, tbody.firstChild);
+
+        // Hapus baris lama di tabel agar tidak kepanjangan
+        if (tbody.children.length > maxDataPoints) {
+            tbody.removeChild(tbody.lastChild);
+        }
+    });
+
+    // 5. FUNGSI TOMBOL KONTROL (Mengirim perintah ke ESP32)
+    function setLogging(status) {
+        db.ref('kontrol/isLogging').set(status);
+        alert(status ? "Perintah START dikirim!" : "Perintah STOP dikirim!");
+    }
+
+    function setInterval() {
+        const detik = document.getElementById('interval-input').value;
+        if(detik < 1) return alert("Interval minimal 1 detik!");
+        const milidetik = detik * 1000;
+        db.ref('kontrol/interval').set(milidetik);
+        alert(`Interval diubah menjadi ${detik} detik`);
+    }
+
+    // Pantau status tombol dari Firebase agar tersinkronisasi
+    db.ref('kontrol/isLogging').on('value', (snap) => {
+        const isLog = snap.val();
+        document.getElementById('status-logging').innerText = isLog ? "MEREKAM (ON)" : "BERHENTI (OFF)";
+        document.getElementById('status-logging').style.color = isLog ? "green" : "red";
+    });
+    
+    db.ref('kontrol/interval').on('value', (snap) => {
+        const val = snap.val();
+        if(val) document.getElementById('interval-input').value = val / 1000;
+    });
+
+</script>
+</body>
