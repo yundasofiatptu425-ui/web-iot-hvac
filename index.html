@@ -55,6 +55,7 @@
             <p>Kelembapan: <span class="value" id="rt-hum">0</span> %</p>
             <p>Suhu LM35: <span class="value" id="rt-suhu-lm">0</span> °C</p>
             <p>Status LED: <span id="rt-led" class="led-indicator"></span> <span id="rt-led-text">Menunggu...</span></p>
+            <p style="font-size: 0.8rem; color: gray;">Update Terakhir: <span id="rt-waktu" style="font-weight: bold;">Menunggu...</span></p>
         </div>
 
         <div class="card">
@@ -80,13 +81,13 @@
     </div>
 
     <h2>Tabel Riwayat Data Terbaru</h2>
-<button class="btn-update" style="margin-bottom: 15px; background-color: #ff9800; color: white;" onclick="downloadCSV()">
+    <button class="btn-update" style="margin-bottom: 15px; background-color: #ff9800; color: white;" onclick="downloadCSV()">
         📥 Download Semua Data ke Excel (CSV)
     </button>
     <table>
         <thead>
             <tr>
-                <th>Waktu (Lokal)</th>
+                <th>Waktu & Tanggal</th>
                 <th>Suhu DHT22 (°C)</th>
                 <th>Kelembapan (%)</th>
                 <th>Suhu LM35 (°C)</th>
@@ -115,7 +116,7 @@
     const db = firebase.database();
 
     // 2. SETUP GRAFIK (Chart.js)
-    const maxDataPoints = 20; // Batasi titik di grafik agar tidak lemot
+    const maxDataPoints = 20; // Batasi jumlah data yang tampil di grafik & tabel
     
     function createChart(ctxId, label, color) {
         return new Chart(document.getElementById(ctxId), {
@@ -147,6 +148,10 @@
             document.getElementById('rt-hum').innerText = data.kelembapan.toFixed(1);
             document.getElementById('rt-suhu-lm').innerText = data.suhu_lm.toFixed(1);
             
+            // Mengambil waktu dari ESP32
+            const waktuAsli = data.timestamp ? data.timestamp : "Waktu Tidak Tersedia";
+            document.getElementById('rt-waktu').innerText = waktuAsli;
+            
             const ledInd = document.getElementById('rt-led');
             document.getElementById('rt-led-text').innerText = data.warna_led;
             ledInd.className = 'led-indicator ' + (data.warna_led === 'MERAH' ? 'merah' : 'hijau');
@@ -154,21 +159,22 @@
     });
 
     // 4. MENGAMBIL DATA RIWAYAT (Untuk Grafik & Tabel)
-    // Ambil 20 data terakhir agar web tidak hang memuat data sebulan
     db.ref('riwayat_data').limitToLast(maxDataPoints).on('child_added', (snapshot) => {
         const data = snapshot.val();
-        const timeNow = new Date().toLocaleTimeString('id-ID'); // Waktu lokal komputer
         
-        // Update Grafik
-        updateChart(chartDHT, timeNow, data.suhu_dht);
-        updateChart(chartHum, timeNow, data.kelembapan);
-        updateChart(chartLM, timeNow, data.suhu_lm);
+        // Membaca waktu langsung dari database Firebase (dikirim oleh ESP32)
+        const waktuData = data.timestamp ? data.timestamp : "-";
+        
+        // Update Grafik dengan waktu asli
+        updateChart(chartDHT, waktuData, data.suhu_dht);
+        updateChart(chartHum, waktuData, data.kelembapan);
+        updateChart(chartLM, waktuData, data.suhu_lm);
 
-        // Update Tabel (Masukkan di baris paling atas)
+        // Update Tabel di baris paling atas
         const tbody = document.getElementById('table-body');
         const row = document.createElement('tr');
         row.innerHTML = `
-            <td>${timeNow}</td>
+            <td>${waktuData}</td>
             <td>${data.suhu_dht.toFixed(1)}</td>
             <td>${data.kelembapan.toFixed(1)}</td>
             <td>${data.suhu_lm.toFixed(1)}</td>
@@ -176,13 +182,13 @@
         `;
         tbody.insertBefore(row, tbody.firstChild);
 
-        // Hapus baris lama di tabel agar tidak kepanjangan
+        // Jaga agar tabel tidak kepanjangan
         if (tbody.children.length > maxDataPoints) {
             tbody.removeChild(tbody.lastChild);
         }
     });
 
-    // 5. FUNGSI TOMBOL KONTROL (Mengirim perintah ke ESP32)
+    // 5. FUNGSI TOMBOL KONTROL
     function setLogging(status) {
         db.ref('kontrol/isLogging').set(status);
         alert(status ? "Perintah START dikirim!" : "Perintah STOP dikirim!");
@@ -196,7 +202,6 @@
         alert(`Interval diubah menjadi ${detik} detik`);
     }
 
-    // Pantau status tombol dari Firebase agar tersinkronisasi
     db.ref('kontrol/isLogging').on('value', (snap) => {
         const isLog = snap.val();
         document.getElementById('status-logging').innerText = isLog ? "MEREKAM (ON)" : "BERHENTI (OFF)";
@@ -207,12 +212,11 @@
         const val = snap.val();
         if(val) document.getElementById('interval-input').value = val / 1000;
     });
-// 6. FUNGSI DOWNLOAD DATA KE EXCEL (CSV)
+
+    // 6. FUNGSI DOWNLOAD DATA KE EXCEL (CSV)
     function downloadCSV() {
-        // Tampilkan pesan agar pengguna tahu sistem sedang bekerja
         alert("Sedang mengambil seluruh riwayat data dari database. Mohon tunggu sebentar...");
 
-        // Mengambil semua data dari node 'riwayat_data' TANPA batasan limit
         db.ref('riwayat_data').once('value').then((snapshot) => {
             const data = snapshot.val();
             if (!data) {
@@ -220,30 +224,28 @@
                 return;
             }
 
-            // 1. Buat Header (Judul Kolom) untuk Excel
-            let csvContent = "ID_Data,Suhu_DHT22(C),Kelembapan(%),Suhu_LM35(C),Warna_LED\n";
+            let csvContent = "Tanggal_Waktu,Suhu_DHT22(C),Kelembapan(%),Suhu_LM35(C),Warna_LED\n";
 
-            // 2. Susun datanya baris demi baris
             for (let key in data) {
                 let row = data[key];
                 
-                // Pastikan format angka rapi
+                // Ambil timestamp dari database
+                let timestamp = row.timestamp ? row.timestamp : "-";
+                
                 let sDht = Number(row.suhu_dht || 0).toFixed(1);
                 let hum = Number(row.kelembapan || 0).toFixed(1);
                 let sLm = Number(row.suhu_lm || 0).toFixed(1);
                 let led = row.warna_led || "-";
 
-                // Gabungkan dengan koma
-                csvContent += `${key},${sDht},${hum},${sLm},${led}\n`;
+                csvContent += `${timestamp},${sDht},${hum},${sLm},${led}\n`;
             }
 
-            // 3. Perintah untuk membuat file dan memicu download otomatis
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             const url = URL.createObjectURL(blob);
             
             link.setAttribute("href", url);
-            link.setAttribute("download", "Riwayat_HVAC_Monitoring.csv"); // Nama file yang terdownload
+            link.setAttribute("download", "Riwayat_HVAC_Monitoring.csv");
             link.style.visibility = 'hidden';
             
             document.body.appendChild(link);
@@ -257,3 +259,4 @@
     }
 </script>
 </body>
+</html>
