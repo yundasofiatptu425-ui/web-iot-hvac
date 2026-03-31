@@ -224,7 +224,8 @@
                 return;
             }
 
-            let csvContent = "Tanggal_Waktu,Suhu_DHT22(C),Kelembapan(%),Suhu_LM35(C),Warna_LED\n";
+            // MENGGUNAKAN TITIK KOMA (;) AGAR RAPI DI EXCEL REGION INDONESIA
+            let csvContent = "Tanggal_Waktu;Suhu_DHT22(C);Kelembapan(%);Suhu_LM35(C);Warna_LED\n";
 
             for (let key in data) {
                 let row = data[key];
@@ -237,7 +238,8 @@
                 let sLm = Number(row.suhu_lm || 0).toFixed(1);
                 let led = row.warna_led || "-";
 
-                csvContent += `${timestamp},${sDht},${hum},${sLm},${led}\n`;
+                // MENGGUNAKAN TITIK KOMA (;) PEMISAH DATA
+                csvContent += `${timestamp};${sDht};${hum};${sLm};${led}\n`;
             }
 
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
