@@ -68,7 +68,7 @@
             <div class="control-group">
                 <label>Interval Data (Detik): </label>
                 <input type="number" id="interval-input" min="1" value="5">
-                <button class="btn-update" onclick="setInterval()">Update Interval</button>
+                <button class="btn-update" onclick="updateInterval()">Update Interval</button>
             </div>
         </div>
     </div>
@@ -194,7 +194,7 @@
         alert(status ? "Perintah START dikirim!" : "Perintah STOP dikirim!");
     }
 
-    function setInterval() {
+    function updateInterval() {
         const detik = document.getElementById('interval-input').value;
         if(detik < 1) return alert("Interval minimal 1 detik!");
         const milidetik = detik * 1000;
