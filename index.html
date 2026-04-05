@@ -15,7 +15,7 @@
         h1 { text-align: center; color: #333; margin-top: 20px;}
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
         
-        /* --- CSS BANNER PERINGATAN (BARU) --- */
+        /* --- CSS BANNER PERINGATAN --- */
         .warning-banner {
             background-color: #dc3545; /* Warna Merah */
             color: white;
@@ -69,7 +69,7 @@
 </head>
 <body>
 
-<audio id="suaraAlarm" src="alarm.mp3" preload="auto" loop></audio>
+<audio id="suaraAlarm" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto" crossorigin="anonymous" loop></audio>
 
 <div id="warning-banner" class="warning-banner">
     ⚠️ PERINGATAN: SUHU MENCAPAI BATAS KRITIS (≥ 30°C)! ⚠️
@@ -103,6 +103,7 @@
             <div class="control-group">
                 <button class="btn-alarm" onclick="aktifkanIzinAudio()">🔊 Izinkan Sistem Alarm Audio</button>
                 <p style="font-size: 0.8rem; color: gray; margin-top: 5px;">*Klik tombol di atas sekali agar web diizinkan membunyikan suara saat suhu tinggi.</p>
+                <button class="btn-stop" onclick="bisukanAlarm()" style="width: 100%; margin-top: 10px; background-color: #6c757d;">🔕 Matikan Suara (Mute)</button>
             </div>
         </div>
     </div>
@@ -155,14 +156,20 @@
     let isAlarmPlaying = false;
 
     function aktifkanIzinAudio() {
+        alarm.muted = false; // Memastikan suara tidak termute saat diizinkan ulang
         alarm.play().then(() => {
             alarm.pause(); 
             alarm.currentTime = 0;
             alert("✅ Izin Audio Berhasil! Alarm siap berbunyi jika suhu menyentuh 30°C.");
         }).catch(error => {
             console.log("Gagal mengaktifkan audio:", error);
-            alert("❌ Gagal mengaktifkan audio. Pastikan file 'alarm.mp3' sudah ada di dalam folder yang sama!");
+            alert("❌ Gagal mengaktifkan audio. Pastikan koneksi internet kamu aktif untuk memuat suara alarm.");
         });
+    }
+
+    function bisukanAlarm() {
+        alarm.muted = true; // Membisukan suara
+        alert("🔕 Suara alarm berhasil dibisukan. Untuk mengaktifkan kembali, klik tombol 'Izinkan Sistem Alarm Audio'.");
     }
 
     // 3. SETUP GRAFIK (Chart.js)
