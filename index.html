@@ -11,10 +11,33 @@
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; }
-        h1 { text-align: center; color: #333; }
-        .container { max-width: 1200px; margin: 0 auto; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; margin: 0; padding: 0; }
+        h1 { text-align: center; color: #333; margin-top: 20px;}
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
         
+        /* --- CSS BANNER PERINGATAN (BARU) --- */
+        .warning-banner {
+            background-color: #dc3545; /* Warna Merah */
+            color: white;
+            text-align: center;
+            padding: 15px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            display: none; /* Sembunyikan secara default */
+            animation: blink 1.5s infinite; /* Efek Kedap-kedip */
+        }
+        
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0.6; }
+            100% { opacity: 1; }
+        }
+        /* ----------------------------------- */
+
         /* Panel Kontrol & Realtime */
         .top-panel { display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
         .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); flex: 1; min-width: 250px;}
@@ -28,6 +51,7 @@
         .btn-start { background-color: #28a745; }
         .btn-stop { background-color: #dc3545; }
         .btn-update { background-color: #17a2b8; }
+        .btn-alarm { background-color: #ff9800; width: 100%; margin-top: 10px;}
 
         /* Grafik */
         .chart-container { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); margin-bottom: 20px; height: 300px; }
@@ -44,6 +68,12 @@
     </style>
 </head>
 <body>
+
+<audio id="suaraAlarm" src="alarm.mp3" preload="auto" loop></audio>
+
+<div id="warning-banner" class="warning-banner">
+    ⚠️ PERINGATAN: SUHU MENCAPAI BATAS KRITIS (≥ 30°C)! ⚠️
+</div>
 
 <div class="container">
     <h1>Dashboard HVAC Monitoring (ESP32)</h1>
@@ -69,6 +99,10 @@
                 <label>Interval Data (Detik): </label>
                 <input type="number" id="interval-input" min="1" value="5">
                 <button class="btn-update" onclick="updateInterval()">Update Interval</button>
+            </div>
+            <div class="control-group">
+                <button class="btn-alarm" onclick="aktifkanIzinAudio()">🔊 Izinkan Sistem Alarm Audio</button>
+                <p style="font-size: 0.8rem; color: gray; margin-top: 5px;">*Klik tombol di atas sekali agar web diizinkan membunyikan suara saat suhu tinggi.</p>
             </div>
         </div>
     </div>
@@ -100,7 +134,7 @@
 </div>
 
 <script>
-    // 1. MASUKKAN KONFIGURASI FIREBASE KAMU DI SINI
+    // 1. KONFIGURASI FIREBASE
     const firebaseConfig = {
         apiKey: "AIzaSyA650d6Wo_1-Z0uqAQ59OLeMPBY3YPilFk",
         authDomain: "monitoring-ry.firebaseapp.com",
@@ -115,8 +149,24 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    // 2. SETUP GRAFIK (Chart.js)
-    const maxDataPoints = 20; // Batasi jumlah data yang tampil di grafik & tabel
+    // 2. SETUP AUDIO ALARM & ELEMEN BANNER
+    const alarm = document.getElementById("suaraAlarm");
+    const warningBanner = document.getElementById("warning-banner");
+    let isAlarmPlaying = false;
+
+    function aktifkanIzinAudio() {
+        alarm.play().then(() => {
+            alarm.pause(); 
+            alarm.currentTime = 0;
+            alert("✅ Izin Audio Berhasil! Alarm siap berbunyi jika suhu menyentuh 30°C.");
+        }).catch(error => {
+            console.log("Gagal mengaktifkan audio:", error);
+            alert("❌ Gagal mengaktifkan audio. Pastikan file 'alarm.mp3' sudah ada di dalam folder yang sama!");
+        });
+    }
+
+    // 3. SETUP GRAFIK (Chart.js)
+    const maxDataPoints = 20; 
     
     function createChart(ctxId, label, color) {
         return new Chart(document.getElementById(ctxId), {
@@ -140,13 +190,16 @@
         chart.update();
     }
 
-    // 3. MENGAMBIL DATA REALTIME (Untuk Kartu di Atas)
+    // 4. MENGAMBIL DATA REALTIME & LOGIKA ALARM (AUDIO + VISUAL)
     db.ref('realtime_data').on('value', (snapshot) => {
         const data = snapshot.val();
         if(data) {
-            document.getElementById('rt-suhu-dht').innerText = data.suhu_dht.toFixed(1);
+            let sDht = parseFloat(data.suhu_dht);
+            let sLm = parseFloat(data.suhu_lm);
+
+            document.getElementById('rt-suhu-dht').innerText = sDht.toFixed(1);
             document.getElementById('rt-hum').innerText = data.kelembapan.toFixed(1);
-            document.getElementById('rt-suhu-lm').innerText = data.suhu_lm.toFixed(1);
+            document.getElementById('rt-suhu-lm').innerText = sLm.toFixed(1);
             
             // Mengambil waktu dari ESP32
             const waktuAsli = data.timestamp ? data.timestamp : "Waktu Tidak Tersedia";
@@ -155,40 +208,57 @@
             const ledInd = document.getElementById('rt-led');
             document.getElementById('rt-led-text').innerText = data.warna_led;
             ledInd.className = 'led-indicator ' + (data.warna_led === 'MERAH' ? 'merah' : 'hijau');
+
+            // --- LOGIKA ALARM AUDIO & VISUAL ---
+            if (sDht >= 30.0 || sLm >= 30.0) {
+                // Tampilkan Banner Peringatan
+                warningBanner.style.display = "block";
+
+                // Bunyikan Audio
+                if (!isAlarmPlaying) {
+                    alarm.play().catch(e => console.log("Menunggu user klik Izinkan Audio"));
+                    isAlarmPlaying = true;
+                }
+            } else {
+                // Sembunyikan Banner Peringatan
+                warningBanner.style.display = "none";
+
+                // Matikan Audio
+                if (isAlarmPlaying) {
+                    alarm.pause();
+                    alarm.currentTime = 0; // Reset ke detik 0
+                    isAlarmPlaying = false;
+                }
+            }
         }
     });
 
-    // 4. MENGAMBIL DATA RIWAYAT (Untuk Grafik & Tabel)
+    // 5. MENGAMBIL DATA RIWAYAT (Untuk Grafik & Tabel)
     db.ref('riwayat_data').limitToLast(maxDataPoints).on('child_added', (snapshot) => {
         const data = snapshot.val();
-        
-        // Membaca waktu langsung dari database Firebase (dikirim oleh ESP32)
         const waktuData = data.timestamp ? data.timestamp : "-";
         
-        // Update Grafik dengan waktu asli
         updateChart(chartDHT, waktuData, data.suhu_dht);
         updateChart(chartHum, waktuData, data.kelembapan);
         updateChart(chartLM, waktuData, data.suhu_lm);
 
-        // Update Tabel di baris paling atas
         const tbody = document.getElementById('table-body');
         const row = document.createElement('tr');
         row.innerHTML = `
             <td>${waktuData}</td>
-            <td>${data.suhu_dht.toFixed(1)}</td>
-            <td>${data.kelembapan.toFixed(1)}</td>
-            <td>${data.suhu_lm.toFixed(1)}</td>
+            <td>${parseFloat(data.suhu_dht).toFixed(1)}</td>
+            <td>${parseFloat(data.kelembapan).toFixed(1)}</td>
+            <td>${parseFloat(data.suhu_lm).toFixed(1)}</td>
             <td style="color:${data.warna_led === 'MERAH' ? 'red' : 'green'}; font-weight:bold;">${data.warna_led}</td>
         `;
         tbody.insertBefore(row, tbody.firstChild);
 
-        // Jaga agar tabel tidak kepanjangan
         if (tbody.children.length > maxDataPoints) {
             tbody.removeChild(tbody.lastChild);
         }
     });
 
-    // 5. FUNGSI TOMBOL KONTROL
+    // 6. FUNGSI TOMBOL KONTROL
     function setLogging(status) {
         db.ref('kontrol/isLogging').set(status);
         alert(status ? "Perintah START dikirim!" : "Perintah STOP dikirim!");
@@ -213,7 +283,7 @@
         if(val) document.getElementById('interval-input').value = val / 1000;
     });
 
-    // 6. FUNGSI DOWNLOAD DATA KE EXCEL (CSV)
+    // 7. FUNGSI DOWNLOAD DATA KE EXCEL (CSV)
     function downloadCSV() {
         alert("Sedang mengambil seluruh riwayat data dari database. Mohon tunggu sebentar...");
 
@@ -224,21 +294,16 @@
                 return;
             }
 
-            // MENGGUNAKAN TITIK KOMA (;) AGAR RAPI DI EXCEL REGION INDONESIA
             let csvContent = "Tanggal_Waktu;Suhu_DHT22(C);Kelembapan(%);Suhu_LM35(C);Warna_LED\n";
 
             for (let key in data) {
                 let row = data[key];
-                
-                // Ambil timestamp dari database
                 let timestamp = row.timestamp ? row.timestamp : "-";
-                
                 let sDht = Number(row.suhu_dht || 0).toFixed(1);
                 let hum = Number(row.kelembapan || 0).toFixed(1);
                 let sLm = Number(row.suhu_lm || 0).toFixed(1);
                 let led = row.warna_led || "-";
 
-                // MENGGUNAKAN TITIK KOMA (;) PEMISAH DATA
                 csvContent += `${timestamp};${sDht};${hum};${sLm};${led}\n`;
             }
 
